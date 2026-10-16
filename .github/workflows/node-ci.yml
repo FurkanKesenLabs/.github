@@ -1,0 +1,199 @@
+# FurkanKesenLabs shared CI recipe for Node projects (pnpm or npm).
+#
+# Two tiers from one file:
+#   fast  — on `push`: install + the caller's quick contract commands (typecheck, build, ...). Target: under 2 minutes.
+#   full  — on `pull_request`, `schedule` and `workflow_dispatch`: install, extra cache, tests, build, end-to-end.
+#           A scheduled run is skipped when the branch head already has a successful scheduled/dispatched full run.
+#
+# Runner: inside the FurkanKesenLabs organization jobs run on Blacksmith; anywhere else they run on GitHub-hosted
+# Ubuntu. Callers can force a label with `runner` (for example `ubuntu-latest` to fall back for a while).
+#
+# Callers (see README.md) only pass commands and a few names. Nothing here reads secrets.
+
+name: node-ci
+
+on:
+  workflow_call:
+    inputs:
+      package-manager:
+        description: "pnpm or npm"
+        type: string
+        default: pnpm
+      node-version-file:
+        description: "File with the Node version, relative to working-directory"
+        type: string
+        default: .nvmrc
+      working-directory:
+        description: "Project root inside the repository"
+        type: string
+        default: "."
+      fast-commands:
+        description: "Newline-separated shell commands for the fast tier (run after install)"
+        type: string
+        default: ""
+      test-command:
+        description: "Test command for the full tier (empty = none)"
+        type: string
+        default: ""
+      build-command:
+        description: "Build command for the full tier (empty = none)"
+        type: string
+        default: ""
+      e2e-command:
+        description: "End-to-end command for the full tier (empty = none)"
+        type: string
+        default: ""
+      env:
+        description: "Newline-separated KEY=VALUE lines exported to every command"
+        type: string
+        default: ""
+      cache-path:
+        description: "Extra directory to cache in the full tier (empty = none)"
+        type: string
+        default: ""
+      cache-name:
+        description: "Key prefix for the extra cache"
+        type: string
+        default: extra
+      cache-key-files:
+        description: "Newline-separated git pathspecs whose content hashes into the extra cache key"
+        type: string
+        default: ""
+      tier:
+        description: "auto (by event), fast or full"
+        type: string
+        default: auto
+      runner:
+        description: "Force a runs-on label; empty = choose by repository owner"
+        type: string
+        default: ""
+      fast-timeout-minutes:
+        type: number
+        default: 10
+      full-timeout-minutes:
+        type: number
+        default: 30
+
+jobs:
+  contracts:
+    name: contracts (fast)
+    if: inputs.tier == 'fast' || (inputs.tier == 'auto' && github.event_name == 'push')
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    timeout-minutes: ${{ inputs.fast-timeout-minutes }}
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        if: inputs.package-manager == 'pnpm'
+        with:
+          package_json_file: ${{ inputs.working-directory }}/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.package-manager == 'pnpm' && format('{0}/pnpm-lock.yaml', inputs.working-directory) || format('{0}/package-lock.json', inputs.working-directory) }}
+      - name: Export caller environment
+        if: inputs.env != ''
+        env:
+          CALLER_ENV: ${{ inputs.env }}
+        run: |
+          printf '%s\n' "$CALLER_ENV" | grep -Ev '^\s*(#|$)' >> "$GITHUB_ENV"
+      - name: Install
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then pnpm install --frozen-lockfile; else npm ci; fi
+      - name: Fast contract commands
+        if: inputs.fast-commands != ''
+        env:
+          FAST_COMMANDS: ${{ inputs.fast-commands }}
+        run: |
+          printf '%s\n' "$FAST_COMMANDS" > "$RUNNER_TEMP/fast.sh"
+          bash -euxo pipefail "$RUNNER_TEMP/fast.sh"
+
+  full:
+    name: full suite
+    if: inputs.tier == 'full' || (inputs.tier == 'auto' && github.event_name != 'push')
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    timeout-minutes: ${{ inputs.full-timeout-minutes }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CI: "true"
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Skip a scheduled run when this commit already has a green full run
+        id: guard
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WF_REF: ${{ github.workflow_ref }}
+          BRANCH: ${{ github.ref_name }}
+          HEAD_SHA: ${{ github.sha }}
+        working-directory: .
+        run: |
+          wf_path="${WF_REF#*/*/}"; wf_path="${wf_path%@*}"
+          last=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=$BRANCH&status=success&per_page=50" \
+            --jq "[.workflow_runs[] | select(.path == \"$wf_path\" and (.event == \"schedule\" or .event == \"workflow_dispatch\"))] | .[0].head_sha // \"\"" 2>/dev/null || echo "")
+          if [ "$last" = "$HEAD_SHA" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$BRANCH@${HEAD_SHA:0:8} already has a successful full run; nothing to do."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.skip != 'true'
+      - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.skip != 'true' && inputs.package-manager == 'pnpm'
+        with:
+          package_json_file: ${{ inputs.working-directory }}/package.json
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
+          cache: ${{ inputs.package-manager }}
+          cache-dependency-path: ${{ inputs.package-manager == 'pnpm' && format('{0}/pnpm-lock.yaml', inputs.working-directory) || format('{0}/package-lock.json', inputs.working-directory) }}
+      - name: Export caller environment
+        if: steps.guard.outputs.skip != 'true' && inputs.env != ''
+        env:
+          CALLER_ENV: ${{ inputs.env }}
+        run: |
+          printf '%s\n' "$CALLER_ENV" | grep -Ev '^\s*(#|$)' >> "$GITHUB_ENV"
+      - name: Install
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then pnpm install --frozen-lockfile; else npm ci; fi
+      - name: Extra cache key
+        id: cache-key
+        if: steps.guard.outputs.skip != 'true' && inputs.cache-path != ''
+        env:
+          KEY_FILES: ${{ inputs.cache-key-files }}
+        working-directory: .
+        run: |
+          mapfile -t specs < <(printf '%s\n' "$KEY_FILES" | grep -Ev '^\s*(#|$)')
+          if [ "${#specs[@]}" -eq 0 ]; then hash=none; else
+            hash=$(git ls-files -z -- "${specs[@]}" | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32)
+          fi
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: steps.guard.outputs.skip != 'true' && inputs.cache-path != ''
+        with:
+          path: ${{ inputs.working-directory }}/${{ inputs.cache-path }}
+          key: ${{ inputs.cache-name }}-${{ steps.cache-key.outputs.hash }}
+          restore-keys: ${{ inputs.cache-name }}-
+      - name: Tests
+        if: steps.guard.outputs.skip != 'true' && inputs.test-command != ''
+        run: ${{ inputs.test-command }}
+      - name: Build
+        if: steps.guard.outputs.skip != 'true' && inputs.build-command != ''
+        run: ${{ inputs.build-command }}
+      - name: End to end
+        if: steps.guard.outputs.skip != 'true' && inputs.e2e-command != ''
+        run: ${{ inputs.e2e-command }}
