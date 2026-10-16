@@ -67,5 +67,8 @@ Callers must grant `permissions: actions: read` for the scheduled-run guard; eve
 2. The moment a project gets CI, it belongs in the organization: transfer first (`gh api repos/<owner>/<name>/transfer -f new_owner=FurkanKesenLabs`), fix the local remote, then add the `ci.yml` above. The runner follows the owner automatically.
 3. At the start of work in a repository, if `origin` redirects to a new owner, update it.
 4. Put CI logic changes here, not in individual projects; projects only pass commands.
+5. Exception: a project deployed through Vercel on the Hobby plan stays on the personal account, because Vercel Hobby
+   cannot deploy private repositories owned by an organization. Its `ci.yml` is the same; the recipe falls back to
+   GitHub-hosted runners outside the organization.
 
 Public on purpose: the recipe contains no secrets, and public reusable workflows can be called from private repositories under any owner.
