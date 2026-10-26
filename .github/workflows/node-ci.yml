@@ -5,8 +5,10 @@
 #   full  — on `pull_request`, `schedule` and `workflow_dispatch`: install, extra cache, tests, build, end-to-end.
 #           A scheduled run is skipped when the branch head already has a successful scheduled/dispatched full run.
 #
-# Runner: inside the FurkanKesenLabs organization jobs run on Blacksmith; anywhere else they run on GitHub-hosted
-# Ubuntu. Callers can force a label with `runner` (for example `ubuntu-latest` to fall back for a while).
+# Runner: inside the FurkanKesenLabs organization jobs run on the label in the calling repository's `CI_RUNNER`
+# variable (`mini-linux` = the self-hosted Mac mini runners) or, when it is unset, on Blacksmith; anywhere else they
+# run on GitHub-hosted Ubuntu. Callers can force a label with `runner` (for example `ubuntu-latest` to fall back for a
+# while). `CI_RUNNER` must be a repository variable: GitHub Free hides organization variables from private repos.
 #
 # Callers (see README.md) only pass commands and a few names. Nothing here reads secrets.
 
@@ -78,7 +80,7 @@ jobs:
   contracts:
     name: contracts (fast)
     if: inputs.tier == 'fast' || (inputs.tier == 'auto' && github.event_name == 'push')
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && vars.CI_RUNNER) || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
     timeout-minutes: ${{ inputs.fast-timeout-minutes }}
     permissions:
       contents: read
@@ -118,7 +120,7 @@ jobs:
   full:
     name: full suite
     if: inputs.tier == 'full' || (inputs.tier == 'auto' && github.event_name != 'push')
-    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    runs-on: ${{ inputs.runner != '' && inputs.runner || (github.repository_owner == 'FurkanKesenLabs' && vars.CI_RUNNER) || (github.repository_owner == 'FurkanKesenLabs' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest') }}
     timeout-minutes: ${{ inputs.full-timeout-minutes }}
     permissions:
       contents: read

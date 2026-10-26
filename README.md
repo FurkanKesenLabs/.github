@@ -2,9 +2,10 @@
 
 One reusable GitHub Actions workflow for the organization's Node projects: `.github/workflows/node-ci.yml`.
 
-- **Runner is chosen by repository owner.** Inside `FurkanKesenLabs` jobs run on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`); anywhere else (for example a repo still on a personal account) they run on GitHub-hosted `ubuntu-latest`. Nothing changes in a project's file when it is transferred into the organization.
+- **Runner is chosen by repository owner.** Inside `FurkanKesenLabs` jobs run on the label in the repository variable `CI_RUNNER` when it is set, otherwise on Blacksmith (`blacksmith-2vcpu-ubuntu-2404`); anywhere else (for example a repo still on a personal account) they run on GitHub-hosted `ubuntu-latest`. Nothing changes in a project's file when it is transferred into the organization.
+- **Self-hosted Mac mini runners.** `CI_RUNNER=mini-linux` sends a repo's jobs to the one-job Linux arm64 runners on Mac Mini 16 (3 slots of 3 GB); `mini-linux-large` sends them to its 7 GB slot. They are Ubuntu 24.04 containers from GitHub's runner image, thrown away after each job, with no Docker socket and no access to the home network. `CI_RUNNER` has to be a repository variable, because GitHub Free hides organization variables from private repositories. Workflows that use deploy or backup secrets stay on hosted runners.
 - **Two tiers.** `push` runs the fast contracts job (install + the commands you list, target under 2 minutes). `pull_request`, `schedule` and `workflow_dispatch` run the full suite (tests, build, end-to-end). A scheduled run skips itself when the branch head already has a green scheduled/dispatched run.
-- **Fallback.** To move every project back to GitHub-hosted runners, change the label in `node-ci.yml` once. To move one project, pass `runner: ubuntu-latest`.
+- **Fallback.** To move a project off the Mac mini, delete its variable (`gh variable delete CI_RUNNER -R FurkanKesenLabs/<name>`); jobs already queued for the mini must be cancelled and re-run. To move every project back to GitHub-hosted runners, change the label in `node-ci.yml` once. To move one run, pass `runner: ubuntu-latest`.
 
 ## Copy this into a project as `.github/workflows/ci.yml`
 
