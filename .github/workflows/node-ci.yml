@@ -90,12 +90,12 @@ jobs:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         if: inputs.package-manager == 'pnpm'
         with:
           package_json_file: ${{ inputs.working-directory }}/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
           cache: ${{ inputs.package-manager }}
@@ -150,13 +150,13 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         if: steps.guard.outputs.skip != 'true'
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v4
         if: steps.guard.outputs.skip != 'true' && inputs.package-manager == 'pnpm'
         with:
           package_json_file: ${{ inputs.working-directory }}/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         if: steps.guard.outputs.skip != 'true'
         with:
           node-version-file: ${{ inputs.working-directory }}/${{ inputs.node-version-file }}
@@ -184,7 +184,7 @@ jobs:
             hash=$(git ls-files -z -- "${specs[@]}" | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-32)
           fi
           echo "hash=$hash" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v6
+      - uses: actions/cache@v4
         if: steps.guard.outputs.skip != 'true' && inputs.cache-path != ''
         with:
           path: ${{ inputs.working-directory }}/${{ inputs.cache-path }}
